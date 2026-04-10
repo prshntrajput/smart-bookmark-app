@@ -1,18 +1,18 @@
 "use client";
 
+import Image from "next/image";
 import { ExternalLink, Trash2, Globe, Sparkles, Loader2 } from "lucide-react";
-import { Button }   from "@/components/ui/button";
-import { cn }       from "@/lib/utils/cn";
-import type { Bookmark }          from "@/types";
-import type { BookmarkCategory }  from "@/inngest/functions/enrich-bookmark";
+import { Button }  from "@/components/ui/button";
+import { cn }      from "@/lib/utils/cn";
+import type { Bookmark }         from "@/types";
+import type { BookmarkCategory } from "@/inngest/functions/enrich-bookmark";
 
 interface BookmarkCardProps {
-  bookmark:         Bookmark;
-  onDeleteRequest:  (bookmark: Bookmark) => void;
-  isPendingAI?:     boolean; // true while Inngest hasn't responded yet
+  bookmark:        Bookmark;
+  onDeleteRequest: (bookmark: Bookmark) => void;
+  isPendingAI?:    boolean;
 }
 
-// Category → Tailwind classes (bg + text, light + dark)
 const CATEGORY_STYLES: Record<BookmarkCategory | "Other", string> = {
   Development:   "bg-blue-100   text-blue-700   dark:bg-blue-900/30   dark:text-blue-400",
   Design:        "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
@@ -40,10 +40,10 @@ export function BookmarkCard({
   return (
     <article className="group flex items-start gap-3 rounded-lg border bg-card p-4 shadow-sm transition-all duration-150 hover:shadow-md hover:border-border/80">
 
-      {/* ── Favicon ───────────────────────────────────────────────────── */}
+      {/* ── Favicon ─────────────────────────────────────────────────── */}
       <FaviconImage domain={domain} />
 
-      {/* ── Main content ──────────────────────────────────────────────── */}
+      {/* ── Main content ────────────────────────────────────────────── */}
       <div className="min-w-0 flex-1">
 
         {/* Title + external link */}
@@ -59,7 +59,7 @@ export function BookmarkCard({
           <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/link:opacity-100" />
         </a>
 
-        {/* Domain + date */}
+        {/* Domain · date · AI badge */}
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className="truncate text-xs text-muted-foreground">{domain}</span>
           <span className="text-xs text-muted-foreground/60">·</span>
@@ -70,7 +70,7 @@ export function BookmarkCard({
             {formattedDate}
           </time>
 
-          {/* ── AI Category badge ──────────────────────────────────── */}
+          {/* AI Category badge — shown after enrichment completes */}
           {bookmark.enriched && bookmark.category && (
             <span
               className={cn(
@@ -83,7 +83,7 @@ export function BookmarkCard({
             </span>
           )}
 
-          {/* ── Pending AI badge — shown while Inngest is working ─── */}
+          {/* Pending AI badge — shown while Inngest is working */}
           {isPendingAI && !bookmark.enriched && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
               <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -92,7 +92,7 @@ export function BookmarkCard({
           )}
         </div>
 
-        {/* ── AI Summary ────────────────────────────────────────────── */}
+        {/* AI Summary — shown after enrichment completes */}
         {bookmark.enriched && bookmark.summary && (
           <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">
             {bookmark.summary}
@@ -100,7 +100,7 @@ export function BookmarkCard({
         )}
       </div>
 
-      {/* ── Delete trigger ────────────────────────────────────────────── */}
+      {/* ── Delete button ────────────────────────────────────────────── */}
       <Button
         variant="ghost"
         size="icon"
@@ -120,21 +120,27 @@ export function BookmarkCard({
 }
 
 // ─── FaviconImage ─────────────────────────────────────────────────────────────
+// Uses next/image with unoptimized=true because the src is an external
+// Google CDN URL — Next.js image optimization doesn't apply to external URLs
+// unless they're listed in next.config domains. unoptimized skips that check
+// while still satisfying the no-img-element ESLint rule.
 function FaviconImage({ domain }: { domain: string }) {
   return (
     <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-muted">
-      <img
+      <Image
         src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
         alt=""
         width={16}
         height={16}
-        loading="lazy"
+        unoptimized
         className="h-4 w-4"
         onError={(e) => {
           (e.target as HTMLImageElement).style.display = "none";
           const parent = (e.target as HTMLImageElement).parentElement;
           if (parent) {
-            const fallback = parent.querySelector("[data-fallback]") as HTMLElement | null;
+            const fallback = parent.querySelector(
+              "[data-fallback]"
+            ) as HTMLElement | null;
             if (fallback) fallback.style.display = "block";
           }
         }}
@@ -149,8 +155,11 @@ function FaviconImage({ domain }: { domain: string }) {
 }
 
 function getDomain(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, ""); }
-  catch { return url; }
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
 }
 
 function formatDate(iso: string): string {
@@ -161,7 +170,8 @@ function formatDate(iso: string): string {
   if (days === 1) return "Yesterday";
   if (days < 7)  return `${days}d ago`;
   return new Intl.DateTimeFormat("en-US", {
-    month: "short", day: "numeric",
-    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+    month: "short",
+    day:   "numeric",
+    year:  date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
   }).format(date);
 }

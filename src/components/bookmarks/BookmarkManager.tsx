@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import { useBookmarks }      from "@/hooks/useBookmarks";
+import { useBookmarks }       from "@/hooks/useBookmarks";
 import { useRealtimeSync, type RealtimeStatus } from "@/hooks/useRealtimeSync";
-import { AddBookmarkForm }   from "./AddBookmarkForm";
-import { BookmarkList }      from "./BookmarkList";
-import { SearchBar }         from "./SearchBar";
+import { AddBookmarkForm }    from "./AddBookmarkForm";
+import { BookmarkList }       from "./BookmarkList";
+import { SearchBar }          from "./SearchBar";
 import { DeleteConfirmModal } from "./DeleteConfirmModal";
-import { cn }                from "@/lib/utils/cn";
-import type { Bookmark }     from "@/types";
+import { cn }                 from "@/lib/utils/cn";
+import type { Bookmark }      from "@/types";
 
 interface BookmarkManagerProps {
   userId: string;
@@ -26,48 +26,12 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
     updateBookmarkInState,
   } = useBookmarks();
 
-  const { status: realtimeStatus, sendInsertNotification } = useRealtimeSync({
-    userId,
-    onInsertPing: refreshBookmarks,
-    onDelete:     removeBookmarkFromState,
-    onUpdate:     updateBookmarkInState,   // ← Feature B: AI enrichment arrives here
-  });
-
-  // ── Feature B: track which bookmarks are pending AI enrichment ────────────
-  // Lives in memory — shows "AI analyzing…" badge until the UPDATE arrives.
+  // ── Feature B: pending AI enrichment IDs ─────────────────────────────────
   const [pendingAIIds, setPendingAIIds] = useState<Set<string>>(new Set());
 
-  // ── Add bookmark ──────────────────────────────────────────────────────────
-  const handleAddBookmark = useCallback(
-    async (url: string, title: string): Promise<void> => {
-      // 1. Insert into DB → get back the created bookmark (with its id)
-      const newBookmark = await addBookmark(url, title);
-
-      // 2. Broadcast to other tabs via Supabase Broadcast
-      sendInsertNotification();
-
-      // 3. Mark as pending AI enrichment → shows "AI analyzing…" badge
-      setPendingAIIds((prev) => new Set([...prev, newBookmark.id]));
-
-      // 4. Send event to Inngest (fire-and-forget, don't await)
-      // Non-blocking: if this fails the bookmark is still saved.
-      triggerEnrichment(newBookmark).catch((err) => {
-        console.warn("[Inngest] Enrichment trigger failed:", err);
-        // Remove from pending — AI badge disappears gracefully
-        setPendingAIIds((prev) => {
-          const next = new Set(prev);
-          next.delete(newBookmark.id);
-          return next;
-        });
-      });
-    },
-    [addBookmark, sendInsertNotification]
-  );
-
-  // When the UPDATE realtime event arrives (enriched = true),
-  // remove the bookmark from the pending set so the badge switches
-  // from "AI analyzing…" to the category chip.
-  // We wrap updateBookmarkInState to also clear the pending ID.
+  // handleUpdate: called by useRealtimeSync when Supabase broadcasts UPDATE.
+  // Merges the enriched bookmark into state AND clears its pending badge.
+  // Defined BEFORE useRealtimeSync so it can be passed as onUpdate.
   const handleUpdate = useCallback(
     (bookmark: Bookmark) => {
       updateBookmarkInState(bookmark);
@@ -82,7 +46,32 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
     [updateBookmarkInState]
   );
 
-  // ── Delete modal state ────────────────────────────────────────────────────
+  const { status: realtimeStatus, sendInsertNotification } = useRealtimeSync({
+    userId,
+    onInsertPing: refreshBookmarks,
+    onDelete:     removeBookmarkFromState,
+    onUpdate:     handleUpdate,   // ← correctly wired (was updateBookmarkInState before)
+  });
+
+  // ── Add bookmark ──────────────────────────────────────────────────────────
+  const handleAddBookmark = useCallback(
+    async (url: string, title: string): Promise<void> => {
+      const newBookmark = await addBookmark(url, title);
+      sendInsertNotification();
+      setPendingAIIds((prev) => new Set([...prev, newBookmark.id]));
+      triggerEnrichment(newBookmark).catch((err) => {
+        console.warn("[Inngest] Enrichment trigger failed:", err);
+        setPendingAIIds((prev) => {
+          const next = new Set(prev);
+          next.delete(newBookmark.id);
+          return next;
+        });
+      });
+    },
+    [addBookmark, sendInsertNotification]
+  );
+
+  // ── Delete modal ──────────────────────────────────────────────────────────
   const [bookmarkToDelete, setBookmarkToDelete] = useState<Bookmark | null>(null);
   const [isDeleting,       setIsDeleting]       = useState(false);
   const [deleteError,      setDeleteError]      = useState<string | null>(null);
@@ -124,7 +113,7 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
       (b) =>
         b.title.toLowerCase().includes(q) ||
         b.url.toLowerCase().includes(q)   ||
-        (b.category?.toLowerCase().includes(q) ?? false) // also search by AI category
+        (b.category?.toLowerCase().includes(q) ?? false)
     );
   }, [bookmarks, searchQuery]);
 
@@ -176,7 +165,7 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
   );
 }
 
-// ── triggerEnrichment (module-level util) ────────────────────────────────────
+// ── triggerEnrichment ─────────────────────────────────────────────────────────
 async function triggerEnrichment(bookmark: Bookmark): Promise<void> {
   const res = await fetch("/api/trigger-enrichment", {
     method:  "POST",
@@ -193,8 +182,11 @@ async function triggerEnrichment(bookmark: Bookmark): Promise<void> {
   }
 }
 
-// ── RealtimeIndicator (unchanged) ────────────────────────────────────────────
-const STATUS_CONFIG: Record<RealtimeStatus, { dot: string; label: string; text: string }> = {
+// ── RealtimeIndicator ─────────────────────────────────────────────────────────
+const STATUS_CONFIG: Record<
+  RealtimeStatus,
+  { dot: string; label: string; text: string }
+> = {
   connecting:   { dot: "bg-amber-400 animate-pulse", label: "Connecting…", text: "text-amber-600 dark:text-amber-400" },
   connected:    { dot: "bg-emerald-500",             label: "Live",        text: "text-emerald-600 dark:text-emerald-400" },
   disconnected: { dot: "bg-red-400",                 label: "Offline",     text: "text-red-500 dark:text-red-400" },
@@ -203,7 +195,10 @@ const STATUS_CONFIG: Record<RealtimeStatus, { dot: string; label: string; text: 
 function RealtimeIndicator({ status }: { status: RealtimeStatus }) {
   const { dot, label, text } = STATUS_CONFIG[status];
   return (
-    <span className={cn("flex items-center gap-1.5 text-xs font-medium", text)} role="status">
+    <span
+      className={cn("flex items-center gap-1.5 text-xs font-medium", text)}
+      role="status"
+    >
       <span className={cn("h-1.5 w-1.5 rounded-full", dot)} aria-hidden="true" />
       {label}
     </span>
