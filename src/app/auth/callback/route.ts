@@ -1,8 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
+import type { CookieMethodsServer } from "@supabase/ssr"; // ← add this import
 import { ROUTES } from "@/constants";
-
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -20,7 +20,8 @@ export async function GET(request: NextRequest) {
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          // ↓ only change — explicit type on the parameter
+          setAll(cookiesToSet: Parameters<CookieMethodsServer["setAll"]>[0]) {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             );
@@ -36,7 +37,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Exchange failed — redirect to login with error param
   return NextResponse.redirect(
     `${origin}${ROUTES.LOGIN}?error=auth_callback_failed`
   );
