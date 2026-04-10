@@ -14,7 +14,6 @@ interface BookmarkManagerProps {
   userId: string;
 }
 
-
 export function BookmarkManager({ userId }: BookmarkManagerProps) {
   const {
     bookmarks,
@@ -24,64 +23,96 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
     deleteBookmark,
     refreshBookmarks,
     removeBookmarkFromState,
+    updateBookmarkInState,
   } = useBookmarks();
 
   const { status: realtimeStatus, sendInsertNotification } = useRealtimeSync({
     userId,
     onInsertPing: refreshBookmarks,
-    onDelete: removeBookmarkFromState,
+    onDelete:     removeBookmarkFromState,
+    onUpdate:     updateBookmarkInState,   // ← Feature B: AI enrichment arrives here
   });
 
-  // ── Delete modal state ───────────────────────────────────────────────────
-  const [bookmarkToDelete, setBookmarkToDelete] = useState<Bookmark | null>(null);
-  const [isDeleting, setIsDeleting]             = useState(false);
-  const [deleteError, setDeleteError]           = useState<string | null>(null);
+  // ── Feature B: track which bookmarks are pending AI enrichment ────────────
+  // Lives in memory — shows "AI analyzing…" badge until the UPDATE arrives.
+  const [pendingAIIds, setPendingAIIds] = useState<Set<string>>(new Set());
 
-  /** Step 1 of delete flow: user clicks 🗑 → open confirmation modal */
+  // ── Add bookmark ──────────────────────────────────────────────────────────
+  const handleAddBookmark = useCallback(
+    async (url: string, title: string): Promise<void> => {
+      // 1. Insert into DB → get back the created bookmark (with its id)
+      const newBookmark = await addBookmark(url, title);
+
+      // 2. Broadcast to other tabs via Supabase Broadcast
+      sendInsertNotification();
+
+      // 3. Mark as pending AI enrichment → shows "AI analyzing…" badge
+      setPendingAIIds((prev) => new Set([...prev, newBookmark.id]));
+
+      // 4. Send event to Inngest (fire-and-forget, don't await)
+      // Non-blocking: if this fails the bookmark is still saved.
+      triggerEnrichment(newBookmark).catch((err) => {
+        console.warn("[Inngest] Enrichment trigger failed:", err);
+        // Remove from pending — AI badge disappears gracefully
+        setPendingAIIds((prev) => {
+          const next = new Set(prev);
+          next.delete(newBookmark.id);
+          return next;
+        });
+      });
+    },
+    [addBookmark, sendInsertNotification]
+  );
+
+  // When the UPDATE realtime event arrives (enriched = true),
+  // remove the bookmark from the pending set so the badge switches
+  // from "AI analyzing…" to the category chip.
+  // We wrap updateBookmarkInState to also clear the pending ID.
+  const handleUpdate = useCallback(
+    (bookmark: Bookmark) => {
+      updateBookmarkInState(bookmark);
+      if (bookmark.enriched) {
+        setPendingAIIds((prev) => {
+          const next = new Set(prev);
+          next.delete(bookmark.id);
+          return next;
+        });
+      }
+    },
+    [updateBookmarkInState]
+  );
+
+  // ── Delete modal state ────────────────────────────────────────────────────
+  const [bookmarkToDelete, setBookmarkToDelete] = useState<Bookmark | null>(null);
+  const [isDeleting,       setIsDeleting]       = useState(false);
+  const [deleteError,      setDeleteError]      = useState<string | null>(null);
+
   const handleDeleteRequest = useCallback((bookmark: Bookmark) => {
     setBookmarkToDelete(bookmark);
-    setDeleteError(null); // clear any previous error
+    setDeleteError(null);
   }, []);
 
-  /** Step 2: user clicks "Cancel" → close modal, no action */
   const handleCancelDelete = useCallback(() => {
-    if (isDeleting) return; // block cancel mid-flight
+    if (isDeleting) return;
     setBookmarkToDelete(null);
     setDeleteError(null);
   }, [isDeleting]);
 
- 
   const handleConfirmDelete = useCallback(async () => {
     if (!bookmarkToDelete) return;
-
     setIsDeleting(true);
     setDeleteError(null);
-
     try {
       await deleteBookmark(bookmarkToDelete.id);
-      // Success: close the modal
       setBookmarkToDelete(null);
     } catch (err) {
-      // Failure: show error inside modal, keep it open.
-      // useBookmarks.deleteBookmark already rolled back the optimistic removal.
       setDeleteError(
-        err instanceof Error
-          ? err.message
-          : "Failed to delete bookmark. Please try again."
+        err instanceof Error ? err.message : "Failed to delete. Try again."
       );
     } finally {
       setIsDeleting(false);
     }
   }, [bookmarkToDelete, deleteBookmark]);
-
-  // ── Add bookmark ─────────────────────────────────────────────────────────
-  const handleAddBookmark = useCallback(
-    async (url: string, title: string): Promise<void> => {
-      await addBookmark(url, title);
-      sendInsertNotification();
-    },
-    [addBookmark, sendInsertNotification]
-  );
 
   // ── Search ────────────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
@@ -92,7 +123,8 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
     return bookmarks.filter(
       (b) =>
         b.title.toLowerCase().includes(q) ||
-        b.url.toLowerCase().includes(q)
+        b.url.toLowerCase().includes(q)   ||
+        (b.category?.toLowerCase().includes(q) ?? false) // also search by AI category
     );
   }, [bookmarks, searchQuery]);
 
@@ -127,13 +159,12 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
             loading={loading}
             error={error}
             onDeleteRequest={handleDeleteRequest}
+            pendingAIIds={pendingAIIds}
             searchQuery={searchQuery}
           />
         </div>
       </div>
 
-      {/* ── Delete confirmation modal ───────────────────────────────────── */}
-      {/* Rendered outside the list so it's never clipped by overflow styles */}
       <DeleteConfirmModal
         bookmark={bookmarkToDelete}
         isDeleting={isDeleting}
@@ -145,33 +176,34 @@ export function BookmarkManager({ userId }: BookmarkManagerProps) {
   );
 }
 
-// ─── RealtimeIndicator ────────────────────────────────────────────────────────
+// ── triggerEnrichment (module-level util) ────────────────────────────────────
+async function triggerEnrichment(bookmark: Bookmark): Promise<void> {
+  const res = await fetch("/api/trigger-enrichment", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({
+      bookmarkId: bookmark.id,
+      url:        bookmark.url,
+      title:      bookmark.title,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Trigger failed (${res.status})`);
+  }
+}
+
+// ── RealtimeIndicator (unchanged) ────────────────────────────────────────────
 const STATUS_CONFIG: Record<RealtimeStatus, { dot: string; label: string; text: string }> = {
-  connecting: {
-    dot:   "bg-amber-400 animate-pulse",
-    label: "Connecting…",
-    text:  "text-amber-600 dark:text-amber-400",
-  },
-  connected: {
-    dot:   "bg-emerald-500",
-    label: "Live",
-    text:  "text-emerald-600 dark:text-emerald-400",
-  },
-  disconnected: {
-    dot:   "bg-red-400",
-    label: "Offline",
-    text:  "text-red-500 dark:text-red-400",
-  },
+  connecting:   { dot: "bg-amber-400 animate-pulse", label: "Connecting…", text: "text-amber-600 dark:text-amber-400" },
+  connected:    { dot: "bg-emerald-500",             label: "Live",        text: "text-emerald-600 dark:text-emerald-400" },
+  disconnected: { dot: "bg-red-400",                 label: "Offline",     text: "text-red-500 dark:text-red-400" },
 };
 
 function RealtimeIndicator({ status }: { status: RealtimeStatus }) {
   const { dot, label, text } = STATUS_CONFIG[status];
   return (
-    <span
-      className={cn("flex items-center gap-1.5 text-xs font-medium", text)}
-      role="status"
-      aria-label={`Real-time sync status: ${label}`}
-    >
+    <span className={cn("flex items-center gap-1.5 text-xs font-medium", text)} role="status">
       <span className={cn("h-1.5 w-1.5 rounded-full", dot)} aria-hidden="true" />
       {label}
     </span>

@@ -1,25 +1,26 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { bookmarkService } from "@/services/bookmark.service";
-import type { Bookmark, BookmarkInsert } from "@/types";
+import { bookmarkService }                  from "@/services/bookmark.service";
+import type { Bookmark }                    from "@/types";
 
 interface UseBookmarksReturn {
-  bookmarks: Bookmark[];
-  loading: boolean;
-  error: string | null;
-  addBookmark: (url: string, title: string) => Promise<void>;
-  deleteBookmark: (id: string) => Promise<void>;
-  refreshBookmarks: () => Promise<void>; // ← NEW: used by useRealtimeSync on INSERT ping
-  removeBookmarkFromState: (id: string) => void;
+  bookmarks:             Bookmark[];
+  loading:               boolean;
+  error:                 string | null;
+  addBookmark:           (url: string, title: string) => Promise<Bookmark>; // now returns Bookmark
+  deleteBookmark:        (id: string)       => Promise<void>;
+  refreshBookmarks:      ()                 => Promise<void>;
+  removeBookmarkFromState: (id: string)     => void;
+  updateBookmarkInState:   (bookmark: Bookmark) => void; // NEW for Feature B
 }
 
 export function useBookmarks(): UseBookmarksReturn {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
 
-  // ── Initial fetch ────────────────────────────────────────────────────────
+  // ── Initial fetch ─────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -36,50 +37,61 @@ export function useBookmarks(): UseBookmarksReturn {
     return () => { cancelled = true; };
   }, []);
 
-  // ── Re-fetch from DB ─────────────────────────────────────────────────────
-  // Called by useRealtimeSync when an INSERT event is received.
-  // We don't trust payload.new — we fetch fresh data instead.
-  // This guarantees the other tab always gets the correct, up-to-date list.
+  // ── Refresh ───────────────────────────────────────────────────────────────
   const refreshBookmarks = useCallback(async () => {
     try {
       const data = await bookmarkService.getAll();
       setBookmarks(data);
     } catch (err) {
-      // Silent fail on refresh — the existing list stays visible.
-      // Don't overwrite the error state here since this isn't the initial load.
-      console.error("[useBookmarks] refreshBookmarks failed:", err);
+      console.error("[useBookmarks] refresh failed:", err);
     }
   }, []);
 
-  // ── Direct state mutation (used for optimistic delete + Realtime DELETE) ─
+  // ── State mutations ───────────────────────────────────────────────────────
   const removeBookmarkFromState = useCallback((id: string) => {
     setBookmarks((prev) => prev.filter((b) => b.id !== id));
   }, []);
 
-  // ── Add ──────────────────────────────────────────────────────────────────
-  // Inserts into DB, then adds to local state immediately.
-  // The Realtime INSERT event will cause OTHER tabs to call refreshBookmarks.
-  // This tab doesn't need refreshBookmarks — it already has the bookmark.
-  const addBookmark = useCallback(async (url: string, title: string): Promise<void> => {
-    const newBookmark = await bookmarkService.create({ url, title });
-    setBookmarks((prev) => {
-      if (prev.some((b) => b.id === newBookmark.id)) return prev;
-      return [newBookmark, ...prev];
-    });
+  /**
+   * updateBookmarkInState — called by useRealtimeSync when Supabase
+   * broadcasts an UPDATE event (i.e. after Inngest enriches the bookmark).
+   * Merges the updated fields into the existing bookmark in state.
+   */
+  const updateBookmarkInState = useCallback((updated: Bookmark) => {
+    setBookmarks((prev) =>
+      prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b))
+    );
   }, []);
 
-  // ── Delete ───────────────────────────────────────────────────────────────
-  // Optimistic removal: updates UI immediately, rolls back on failure.
-  const deleteBookmark = useCallback(async (id: string): Promise<void> => {
-    const snapshot = bookmarks;
-    removeBookmarkFromState(id);
-    try {
-      await bookmarkService.delete(id);
-    } catch (err) {
-      setBookmarks(snapshot);
-      throw err;
-    }
-  }, [bookmarks, removeBookmarkFromState]);
+  // ── Add ───────────────────────────────────────────────────────────────────
+  // Changed: now returns the created Bookmark so BookmarkManager
+  // can pass its id to the Inngest trigger.
+  const addBookmark = useCallback(
+    async (url: string, title: string): Promise<Bookmark> => {
+      const newBookmark = await bookmarkService.create({ url, title });
+      setBookmarks((prev) => {
+        if (prev.some((b) => b.id === newBookmark.id)) return prev;
+        return [newBookmark, ...prev];
+      });
+      return newBookmark;
+    },
+    []
+  );
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+  const deleteBookmark = useCallback(
+    async (id: string): Promise<void> => {
+      const snapshot = bookmarks;
+      removeBookmarkFromState(id);
+      try {
+        await bookmarkService.delete(id);
+      } catch (err) {
+        setBookmarks(snapshot);
+        throw err;
+      }
+    },
+    [bookmarks, removeBookmarkFromState]
+  );
 
   return {
     bookmarks,
@@ -89,5 +101,6 @@ export function useBookmarks(): UseBookmarksReturn {
     deleteBookmark,
     refreshBookmarks,
     removeBookmarkFromState,
+    updateBookmarkInState,
   };
 }

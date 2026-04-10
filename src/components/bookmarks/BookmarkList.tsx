@@ -1,19 +1,24 @@
 "use client";
 
-import { BookmarkCard }   from "./BookmarkCard";
-import { EmptyState }     from "./EmptyState";
-import { Skeleton }       from "@/components/ui/skeleton";
-import { Button }         from "@/components/ui/button";
-import { AlertCircle }    from "lucide-react";
-import type { Bookmark }  from "@/types";
+import { BookmarkCard }  from "./BookmarkCard";
+import { EmptyState }    from "./EmptyState";
+import { Skeleton }      from "@/components/ui/skeleton";
+import { Button }        from "@/components/ui/button";
+import { AlertCircle }   from "lucide-react";
+import type { Bookmark } from "@/types";
 
 interface BookmarkListProps {
-  bookmarks: Bookmark[];
-  loading: boolean;
-  error: string | null;
-  /** Updated: receives full bookmark object for the confirmation modal */
+  bookmarks:       Bookmark[];
+  loading:         boolean;
+  error:           string | null;
   onDeleteRequest: (bookmark: Bookmark) => void;
-  searchQuery?: string;
+  /**
+   * Set of bookmark IDs currently being enriched by Inngest.
+   * Passed down to BookmarkCard to show the "AI analyzing…" badge.
+   * Lives in BookmarkManager state — cleared when the UPDATE event arrives.
+   */
+  pendingAIIds?:   Set<string>;
+  searchQuery?:    string;
 }
 
 export function BookmarkList({
@@ -21,13 +26,18 @@ export function BookmarkList({
   loading,
   error,
   onDeleteRequest,
-  searchQuery = "",
+  pendingAIIds = new Set(),
+  searchQuery  = "",
 }: BookmarkListProps) {
 
-  // ── 1. Loading ────────────────────────────────────────────────────────
+  // ── 1. Loading ──────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="space-y-2" aria-label="Loading bookmarks" aria-busy="true">
+      <div
+        className="space-y-2"
+        aria-label="Loading bookmarks"
+        aria-busy="true"
+      >
         {Array.from({ length: 4 }).map((_, i) => (
           <BookmarkCardSkeleton key={i} />
         ))}
@@ -35,7 +45,7 @@ export function BookmarkList({
     );
   }
 
-  // ── 2. Error ──────────────────────────────────────────────────────────
+  // ── 2. Error ────────────────────────────────────────────────────────────
   if (error) {
     return (
       <div
@@ -60,7 +70,7 @@ export function BookmarkList({
     );
   }
 
-  // ── 3. Empty ──────────────────────────────────────────────────────────
+  // ── 3. Empty ────────────────────────────────────────────────────────────
   if (bookmarks.length === 0) {
     if (searchQuery.trim()) {
       return (
@@ -77,7 +87,7 @@ export function BookmarkList({
     return <EmptyState />;
   }
 
-  // ── 4. Populated list ─────────────────────────────────────────────────
+  // ── 4. Populated list ───────────────────────────────────────────────────
   return (
     <section aria-label="Your bookmarks">
       {searchQuery.trim() && (
@@ -93,6 +103,10 @@ export function BookmarkList({
             <BookmarkCard
               bookmark={bookmark}
               onDeleteRequest={onDeleteRequest}
+              // isPendingAI: true while Inngest hasn't responded yet.
+              // BookmarkCard shows "AI analyzing…" spinner badge.
+              // Cleared automatically when UPDATE Realtime event arrives.
+              isPendingAI={pendingAIIds.has(bookmark.id)}
             />
           </li>
         ))}
@@ -112,8 +126,11 @@ function BookmarkCardSkeleton() {
       <Skeleton className="mt-0.5 h-8 w-8 shrink-0 rounded-md" />
       <div className="flex-1 space-y-2">
         <Skeleton className="h-4 w-3/5" />
-        <Skeleton className="h-3 w-2/5" />
-        <Skeleton className="h-3 w-1/4" />
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-3 w-1/4" />
+          <Skeleton className="h-3 w-1/6" />
+        </div>
+        <Skeleton className="h-3 w-4/5" />
       </div>
       <Skeleton className="h-8 w-8 shrink-0 rounded-md" />
     </div>
