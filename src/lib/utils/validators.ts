@@ -1,53 +1,60 @@
 /**
- * Pure validation utilities — no side effects, fully testable.
- * SRP: this module's only job is input validation.
+ * validators.ts — SRP: all validation logic lives here.
+ * DRY: called by AddBookmarkForm and any future API route validation.
  */
 
-import { APP_CONFIG } from "@/constants";
+export interface BookmarkValidationResult {
+  valid:      boolean;
+  urlError:   string | null;
+  titleError: string | null;
+}
 
-export function isValidUrl(url: string): boolean {
+/**
+ * Validates bookmark url + title together.
+ * Returns field-specific errors so the form can display them
+ * next to the correct input.
+ *
+ * Accepts an object { url, title } — not two separate params.
+ * This is the fixed signature that AddBookmarkForm expects.
+ */
+export function validateBookmark({
+  url,
+  title,
+}: {
+  url:   string;
+  title: string;
+}): BookmarkValidationResult {
+  let urlError:   string | null = null;
+  let titleError: string | null = null;
+
+  // ── URL validation ──────────────────────────────────────────────────────
+  if (!url.trim()) {
+    urlError = "URL is required.";
+  } else if (!isValidUrl(url.trim())) {
+    urlError = "Enter a valid URL starting with http:// or https://";
+  } else if (url.trim().length > 2048) {
+    urlError = "URL must be under 2048 characters.";
+  }
+
+  // ── Title validation ────────────────────────────────────────────────────
+  if (!title.trim()) {
+    titleError = "Title is required.";
+  } else if (title.trim().length > 255) {
+    titleError = "Title must be under 255 characters.";
+  }
+
+  return {
+    valid: urlError === null && titleError === null,
+    urlError,
+    titleError,
+  };
+}
+
+function isValidUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
   }
-}
-
-export function isValidTitle(title: string): boolean {
-  const trimmed = title.trim();
-  return trimmed.length >= 1 && trimmed.length <= APP_CONFIG.MAX_TITLE_LENGTH;
-}
-
-export interface ValidationResult {
-  valid: boolean;
-  error?: string;
-}
-
-export function validateBookmark(
-  url: string,
-  title: string
-): ValidationResult {
-  if (!url.trim()) {
-    return { valid: false, error: "URL is required" };
-  }
-  if (!isValidUrl(url)) {
-    return {
-      valid: false,
-      error: "Please enter a valid URL (must start with http:// or https://)",
-    };
-  }
-  if (url.length > APP_CONFIG.MAX_URL_LENGTH) {
-    return { valid: false, error: "URL is too long" };
-  }
-  if (!title.trim()) {
-    return { valid: false, error: "Title is required" };
-  }
-  if (!isValidTitle(title)) {
-    return {
-      valid: false,
-      error: `Title must be between 1 and ${APP_CONFIG.MAX_TITLE_LENGTH} characters`,
-    };
-  }
-  return { valid: true };
 }

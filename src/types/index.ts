@@ -13,6 +13,9 @@ export interface Bookmark {
   title: string;
   created_at: string;
   updated_at: string;
+  category?: string | null;
+  summary?:  string | null;
+  enriched?: boolean;
 }
 
 export interface AppUser {
@@ -24,6 +27,19 @@ export interface AppUser {
 
 /** Used when creating a new bookmark — id and timestamps are DB-generated */
 export type BookmarkInsert = Pick<Bookmark, "url" | "title">;
+
+// ── Feature A: URL Metadata ───────────────────────────────────────────────────
+
+/**
+ * Shape returned by /api/fetch-metadata and metadataService.
+ * All fields are nullable — a page might not have og:title, etc.
+ */
+
+export interface UrlMetadata {
+  title:       string | null;
+  description: string | null;
+  image:       string | null;
+}
 
 /** Used when updating an existing bookmark */
 export type BookmarkUpdate = Partial<BookmarkInsert>;
