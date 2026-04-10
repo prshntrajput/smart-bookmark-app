@@ -29,28 +29,32 @@ const enrichmentSchema = z.object({
     .describe("A single sentence (max 150 chars) describing this bookmark."),
 });
 
+// Defined once here — used to type event.data since we removed
+// the global Events generic from client.ts
+type EnrichBookmarkEventData = {
+  bookmarkId: string;
+  url:        string;
+  title:      string;
+  userId:     string;
+};
+
 export const enrichBookmark = inngest.createFunction(
-  // ── Argument 1: config + triggers combined (v3 API) ───────────────────────
-  // BREAKING CHANGE from v2/early-v3:
-  //   Old (3 args): createFunction(config, { event: "..." }, handler)
-  //   New (2 args): createFunction({ ...config, triggers: [...] }, handler)
   {
-    id:   "enrich-bookmark",
-    name: "Enrich Bookmark with AI",
+    id:      "enrich-bookmark",
+    name:    "Enrich Bookmark with AI",
     retries: 3,
     concurrency: {
       limit: 5,
       key:   "event.data.userId",
     },
-    // trigger is now INSIDE the first argument
     triggers: [{ event: "bookmark/added" as const }],
   },
 
-  // ── Argument 2: handler function ──────────────────────────────────────────
   async ({ event, step }) => {
-    const { bookmarkId, url, title } = event.data;
+    // ↓ only change — cast event.data so TypeScript knows the shape
+    const { bookmarkId, url, title } = event.data as EnrichBookmarkEventData;
 
-    // ── Step 1: Gemini categorize + summarize ───────────────────────────
+    // ── Step 1: Gemini categorize + summarize ─────────────────────────────
     const enrichment = await step.run("ai-categorize-and-summarize", async () => {
       const google = createGoogleGenerativeAI({
         apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY!,
@@ -65,7 +69,7 @@ export const enrichBookmark = inngest.createFunction(
       return object;
     });
 
-    // ── Step 2: Persist to Supabase via service role ────────────────────
+    // ── Step 2: Persist to Supabase via service role ──────────────────────
     await step.run("save-enrichment-to-db", async () => {
       const { error } = await supabaseAdmin
         .from("bookmarks")
