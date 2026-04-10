@@ -2,8 +2,8 @@
 
 A production-grade bookmark manager with AI-powered categorization, real-time sync across tabs, and Google OAuth authentication.
 
-**Live Demo:** [your-app.vercel.app](https://your-app.vercel.app)  
-**Repo:** [github.com/your-username/smart-bookmark](https://github.com/your-username/smart-bookmark)
+**Live Demo:** [https://smart-bookmark-app-drab-three.vercel.app/](https://your-app.vercel.app)  
+**Repo:** [https://github.com/prshntrajput/smart-bookmark-app](https://github.com/your-username/smart-bookmark)
 
 ---
 
@@ -48,7 +48,7 @@ The codebase follows **SOLID**, **DRY**, and clean architecture patterns:
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/your-username/smart-bookmark.git
+git clone https://github.com/prshntrajput/smart-bookmark-app
 cd smart-bookmark
 npm install
 ```
@@ -179,7 +179,7 @@ The `CHANNEL_ERROR` status fires when the WebSocket closes — most commonly due
 
 ---
 
-## 🤖 Bonus Feature: AI Enrichment with Inngest + Gemini
+##  Bonus Feature: AI Enrichment with Inngest + Gemini
 
 ### What It Does
 
@@ -225,7 +225,7 @@ Gemini 2.0 Flash has a generous free tier, sub-second latency for structured out
 
 ---
 
-## 🐛 Problems Encountered & How They Were Solved
+##  Problems Encountered & How They Were Solved
 
 ### 1. `url.trim is not a function`
 
@@ -294,7 +294,7 @@ Your app is now live. ✅
 
 ---
 
-## 💡 One Thing I'd Improve
+##  One Thing I'd Improve
 
 **Bulk import from browser bookmarks.** Currently users add bookmarks one at a time. The highest-value improvement would be a drag-and-drop importer that accepts a browser bookmark HTML export file, parses all URLs, batch-inserts them, and enqueues Inngest enrichment jobs for each one. Inngest's `concurrency` control already handles rate limiting for bulk workloads — the infrastructure is ready, just the import UI and batch-insert service method are missing.
 
