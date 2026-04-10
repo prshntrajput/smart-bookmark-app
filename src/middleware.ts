@@ -2,9 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { ROUTES } from "@/constants";
 
-
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
+
+  // Derive cookie options type from NextResponse.cookies.set
+  // (same pattern used in server.ts and auth/callback/route.ts)
+  type CookieSetOptions = Parameters<typeof supabaseResponse.cookies.set>[2];
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,7 +17,9 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(
+          cookiesToSet: { name: string; value: string; options: CookieSetOptions }[]
+        ) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
@@ -49,7 +54,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Match all routes EXCEPT: _next/static, _next/image, favicon, and image files
-    "/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
